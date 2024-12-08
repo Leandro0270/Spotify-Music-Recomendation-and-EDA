@@ -1,95 +1,120 @@
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.neighbors import NearestNeighbors
+from scipy.spatial.distance import cdist
 import streamlit as st
 import pandas as pd
 import numpy as np
-from scipy.spatial.distance import cdist
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
-from sklearn.cluster import KMeans
-import random
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 
-# Carregar dados
+
+# Configurar Spotipy
+CLIENT_ID = "41d0a0be0c2b45568f6b270a797cf3d0"
+CLIENT_SECRET = "8c7c583e97b74e718c614769a71b1e91"
+sp = spotipy.Spotify(client_credentials_manager=SpotifyClientCredentials(client_id=CLIENT_ID, client_secret=CLIENT_SECRET))
+
+
 @st.cache_data
 def load_data():
     data = pd.read_csv("refined_data.csv")
     
-    # Garantir que colunas numéricas sejam tratadas corretamente
-    feature_names = [
-        'year', 'danceability', 'energy', 'loudness', 'mode', 'speechiness',
-        'acousticness', 'instrumentalness', 'liveness', 'valence', 'duration_ms'
-    ]
-    for feature in feature_names:
-        data[feature] = pd.to_numeric(data[feature], errors='coerce')
-    data.fillna('', inplace=True)  # Preencher valores ausentes com strings vazias
-    
-    # Garantir que track_name e artists sejam strings
-    data['track_name'] = data['track_name'].fillna('Unknown Track').astype(str)
-    data['artists'] = data['artists'].fillna('Unknown Artist').astype(str)
-    
-    # Criar uma coluna com o formato desejado
-    data['display_name'] = data['track_name'] + " - " + data['artists'] + " (" + data['year'].astype(str) + ")"
-    return data
-
-data = load_data()
-
-# Configurar KMeans
-@st.cache_resource
-def setup_kmeans(data):
-    number_cols = [
+    # Colunas numéricas
+    numeric_cols = [
         'valence', 'acousticness', 'danceability', 'duration_ms',
         'energy', 'instrumentalness', 'key', 'liveness', 'loudness', 'mode',
-        'popularity', 'speechiness', 'tempo', 'year'
+        'popularity', 'speechiness', 'tempo'
     ]
+    
+    # Garantir que as colunas numéricas sejam processadas corretamente
+    for col in numeric_cols:
+        data[col] = pd.to_numeric(data[col], errors='coerce')
+    data.fillna(0, inplace=True)
+
+    # Mapear gêneros para valores numéricos
+    le = LabelEncoder()
+    data['genre_encoded'] = le.fit_transform(data['genre'].fillna('Unknown Genre'))
+    numeric_cols.append('genre_encoded')
+
+    # Criar coluna de exibição no Streamlit
+    data['track_name'] = data['track_name'].fillna('Unknown Track').astype(str)
+    data['artists'] = data['artists'].fillna('Unknown Artist').astype(str)
+    data['display_name'] = data['track_name'] + " - " + data['artists'] + " (" + data['year'].astype(int).astype(str) + ")"
+    
+    return data, numeric_cols
+
+data, numeric_cols = load_data()
+
+# Configuração do KNN
+@st.cache_resource
+def setup_knn(data, numeric_cols, n_neighbors=10):
     scaler = StandardScaler()
-    scaled_data = scaler.fit_transform(data[number_cols].fillna(0))
-    kmeans = KMeans(n_clusters=20, random_state=42).fit(scaled_data)
-    data['cluster_label'] = kmeans.predict(scaled_data)
-    return data, scaler, kmeans, number_cols
+    scaled_data = scaler.fit_transform(data[numeric_cols])
+    knn = NearestNeighbors(n_neighbors=n_neighbors, metric='euclidean').fit(scaled_data)
+    return data, scaler, knn
 
-data, scaler, kmeans, number_cols = setup_kmeans(data)
+data, scaler, knn = setup_knn(data, numeric_cols)
 
-# Funções de Recomendação
+# Funções auxiliares
+def get_album_cover(song_name, artist_name):
+    """Buscar a capa do álbum no Spotify."""
+    try:
+        results = sp.search(q=f"track:{song_name} artist:{artist_name}", type="track", limit=1)
+        if results and results["tracks"]["items"]:
+            album_cover_url = results["tracks"]["items"][0]["album"]["images"][0]["url"]
+            return album_cover_url
+        else:
+            return "https://i.postimg.cc/0QNxYz4V/social.png"  # Placeholder caso não encontre a imagem
+    except Exception as e:
+        st.warning(f"Erro ao buscar capa do álbum: {e}")
+        return "https://i.postimg.cc/0QNxYz4V/social.png"
+
 def get_song_data(song_name, data):
     try:
         return data[data['display_name'] == song_name].iloc[0]
     except IndexError:
         return None
 
-def get_mean_vector(song_list, data, scaler, number_cols):
+def get_mean_vector(song_list, data, numeric_cols):
     vectors = []
     for song_name in song_list:
         song_data = get_song_data(song_name, data)
         if song_data is None:
             continue
-        vector = song_data[number_cols].values
+        vector = song_data[numeric_cols].values
         vectors.append(vector)
     if not vectors:
         raise ValueError("Nenhuma música válida selecionada para a recomendação.")
     return np.mean(vectors, axis=0)
 
-def recommend_songs(song_list, data, scaler, number_cols, n_songs=10):
-    mean_vector = get_mean_vector(song_list, data, scaler, number_cols)
-    song_matrix = scaler.transform(data[number_cols].fillna(0))
-    distances = cdist([mean_vector], song_matrix, metric='cosine')[0]
-    data['distance'] = distances
-    recommendations = data.sort_values('distance').head(n_songs)
-    return recommendations[['track_name', 'artists', 'year']]
+def recommend_songs_knn(song_list, data, scaler, numeric_cols, knn, n_neighbors=10):
+    mean_vector = get_mean_vector(song_list, data, numeric_cols)
+    scaled_mean_vector = scaler.transform([mean_vector])
+    distances, indices = knn.kneighbors(scaled_mean_vector)
+    recommendations = data.iloc[indices[0]].copy()
+    recommendations['distance'] = distances[0]
+    return filter_recommendations(song_list, recommendations, n_neighbors)
 
-# Estado da sessão para armazenar músicas selecionadas
+def filter_recommendations(song_list, recommendations, n_songs):
+    # Remover músicas que estão na lista de entrada
+    filtered_recommendations = recommendations[~recommendations['display_name'].isin(song_list)].copy()
+    
+    # Selecionar 5 músicas aleatórias das mais próximas
+    if len(filtered_recommendations) > 5:
+        filtered_recommendations = filtered_recommendations.sample(5)
+    return filtered_recommendations[['track_name', 'artists', 'year', 'genre']]
+
+# Estado da sessão
 if "selected_songs" not in st.session_state:
     st.session_state.selected_songs = []
 
 # Interface Streamlit
 st.title("Recomendação de Músicas 🎵")
-
-# Campo de busca
 search_query = st.text_input("Digite o nome da música ou artista:")
+
 if search_query:
     search_results = data[data['display_name'].str.contains(search_query, case=False, na=False)]
     if not search_results.empty:
-        selected_song = st.selectbox(
-            "Selecione uma música:",
-            options=search_results['display_name']
-        )
+        selected_song = st.selectbox("Selecione uma música:", options=search_results['display_name'])
     else:
         selected_song = None
         st.write("Nenhuma música encontrada.")
@@ -116,15 +141,22 @@ else:
 if st.session_state.selected_songs:
     if st.button("Recomendar músicas"):
         try:
-            recommendations = recommend_songs(
+            recommendations = recommend_songs_knn(
                 st.session_state.selected_songs,
                 data,
                 scaler,
-                number_cols
+                numeric_cols,
+                knn
             )
             st.subheader("Recomendações:")
-            random_recommendations = recommendations.sample(5)
-            for i, row in random_recommendations.iterrows():
-                st.write(f"- {row['track_name']} - {row['artists']} ({row['year']})")
+            for _, row in recommendations.iterrows():
+                album_cover = get_album_cover(row['track_name'], row['artists'])
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    st.image(album_cover, width=150)
+                with col2:
+                    st.write(f"**{row['track_name']}**")
+                    st.write(f"{row['artists']} ({row['year']})")
+                    st.write(f"Gênero: {row['genre']}")
         except ValueError as e:
             st.error(str(e))
