@@ -8,7 +8,6 @@ import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 
 
-# Configurar Spotipy
 CLIENT_ID = "41d0a0be0c2b45568f6b270a797cf3d0"
 CLIENT_SECRET = "8c7c583e97b74e718c614769a71b1e91"
 sp = spotipy.Spotify(client_credentials_manager=SpotifyClientCredentials(client_id=CLIENT_ID, client_secret=CLIENT_SECRET))
@@ -18,24 +17,20 @@ sp = spotipy.Spotify(client_credentials_manager=SpotifyClientCredentials(client_
 def load_data():
     data = pd.read_csv("refined_data.csv")
     
-    # Colunas numéricas
     numeric_cols = [
         'valence', 'acousticness', 'danceability', 'duration_ms',
         'energy', 'instrumentalness', 'key', 'liveness', 'loudness', 'mode',
         'popularity', 'speechiness', 'tempo'
     ]
     
-    # Garantir que as colunas numéricas sejam processadas corretamente
     for col in numeric_cols:
         data[col] = pd.to_numeric(data[col], errors='coerce')
     data.fillna(0, inplace=True)
 
-    # Mapear gêneros para valores numéricos
     le = LabelEncoder()
     data['genre_encoded'] = le.fit_transform(data['genre'].fillna('Unknown Genre'))
     numeric_cols.append('genre_encoded')
 
-    # Criar coluna de exibição no Streamlit
     data['track_name'] = data['track_name'].fillna('Unknown Track').astype(str)
     data['artists'] = data['artists'].fillna('Unknown Artist').astype(str)
     data['display_name'] = data['track_name'] + " - " + data['artists'] + " (" + data['year'].astype(int).astype(str) + ")"
@@ -44,7 +39,6 @@ def load_data():
 
 data, numeric_cols = load_data()
 
-# Configuração do KNN
 @st.cache_resource
 def setup_knn(data, numeric_cols, n_neighbors=10):
     scaler = StandardScaler()
@@ -54,7 +48,6 @@ def setup_knn(data, numeric_cols, n_neighbors=10):
 
 data, scaler, knn = setup_knn(data, numeric_cols)
 
-# Funções auxiliares
 def get_album_cover(song_name, artist_name):
     """Buscar a capa do álbum no Spotify."""
     try:
@@ -63,7 +56,7 @@ def get_album_cover(song_name, artist_name):
             album_cover_url = results["tracks"]["items"][0]["album"]["images"][0]["url"]
             return album_cover_url
         else:
-            return "https://i.postimg.cc/0QNxYz4V/social.png"  # Placeholder caso não encontre a imagem
+            return "https://i.postimg.cc/0QNxYz4V/social.png" 
     except Exception as e:
         st.warning(f"Erro ao buscar capa do álbum: {e}")
         return "https://i.postimg.cc/0QNxYz4V/social.png"
@@ -95,19 +88,17 @@ def recommend_songs_knn(song_list, data, scaler, numeric_cols, knn, n_neighbors=
     return filter_recommendations(song_list, recommendations, n_neighbors)
 
 def filter_recommendations(song_list, recommendations, n_songs):
-    # Remover músicas que estão na lista de entrada
     filtered_recommendations = recommendations[~recommendations['display_name'].isin(song_list)].copy()
     
-    # Selecionar 5 músicas aleatórias das mais próximas
     if len(filtered_recommendations) > 5:
         filtered_recommendations = filtered_recommendations.sample(5)
     return filtered_recommendations[['track_name', 'artists', 'year', 'genre']]
 
-# Estado da sessão
+
 if "selected_songs" not in st.session_state:
     st.session_state.selected_songs = []
 
-# Interface Streamlit
+
 st.title("Recomendação de Músicas 🎵")
 search_query = st.text_input("Digite o nome da música ou artista:")
 
@@ -121,7 +112,7 @@ if search_query:
 else:
     selected_song = None
 
-# Botão para adicionar música
+
 if selected_song and st.button("Adicionar música"):
     if selected_song not in st.session_state.selected_songs:
         st.session_state.selected_songs.append(selected_song)
@@ -129,7 +120,7 @@ if selected_song and st.button("Adicionar música"):
     else:
         st.warning("A música já está na lista.")
 
-# Mostrar músicas selecionadas
+
 st.subheader("Músicas Selecionadas:")
 if st.session_state.selected_songs:
     for song in st.session_state.selected_songs:
@@ -137,7 +128,7 @@ if st.session_state.selected_songs:
 else:
     st.write("Nenhuma música adicionada ainda.")
 
-# Botão para recomendar músicas
+
 if st.session_state.selected_songs:
     if st.button("Recomendar músicas"):
         try:
