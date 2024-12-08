@@ -10,7 +10,7 @@ import random
 # Carregar dados
 @st.cache_data
 def load_data():
-    data = pd.read_csv("/workspaces/mtad-spotify-data-analysis/datasets/refined_data.csv")
+    data = pd.read_csv("refined_data.csv")
     
     # Garantir que colunas numéricas sejam tratadas corretamente
     feature_names = [
