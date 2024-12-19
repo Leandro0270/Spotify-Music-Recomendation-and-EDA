@@ -1,6 +1,10 @@
 streamlit
 pandas
 numpy
+matplotlib
+yellowbrick
 scikit-learn
+seaborn
 plotly
+jupyter
 spotipy

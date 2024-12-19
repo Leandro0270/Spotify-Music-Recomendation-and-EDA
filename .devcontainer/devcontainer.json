@@ -1,30 +1,30 @@
 {
-  "name": "Python 3",
-  "image": "mcr.microsoft.com/devcontainers/python:3.9-bullseye",
+  "name": "Python 3 with CUDA",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
   "customizations": {
     "codespaces": {
-      "openFiles": [
-        "README.md",
-        "streamlit_app.py"
-      ]
+      "openFiles": ["README.md", "streamlit_app.py"]
     },
     "vscode": {
       "settings": {},
       "extensions": [
         "ms-python.python",
-        "ms-python.vscode-pylance"
+        "ms-python.vscode-pylance",
+        "ms-toolsai.jupyter" 
       ]
     }
   },
-  "updateContentCommand": "[ -f packages.txt ] && sudo apt update && sudo apt upgrade -y && sudo xargs apt install -y <packages.txt; [ -f requirements.txt ] && pip3 install --user -r requirements.txt; pip3 install --user streamlit; echo '✅ Packages installed and Requirements met'; sudo apt update && sudo apt install -y git-lfs && git lfs install && git lfs pull",
-  "postAttachCommand": "sleep 30 && streamlit run ./scripts/streamlit_app.py --server.enableCORS false --server.enableXsrfProtection false",
+  "updateContentCommand": "/bin/bash -c \"[ -f packages.txt ] && sudo apt-get update && sudo apt-get upgrade -y && xargs sudo apt-get install -y <packages.txt; [ -f requirements.txt ] && pip3 install -r requirements.txt; echo '✅ Dependencies installed';\"",
+  "postAttachCommand": "streamlit run ./streamlit_app.py --server.enableCORS false --server.enableXsrfProtection false",
   "portsAttributes": {
     "8501": {
       "label": "Application",
       "onAutoForward": "openPreview"
     }
   },
-  "forwardPorts": [
-    8501
-  ]
+  "forwardPorts": [8501],
+  "runArgs": ["--gpus", "all"]
 }
